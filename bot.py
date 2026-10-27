@@ -1065,10 +1065,12 @@ def parse_stake(args, bal, currency=None, d=None):
         if cur != "INR":
             stake = to_inr(stake, cur, d)
     if stake is not None:
-        stake = round(float(stake), 2)
-        if stake > bal:
-            stake = bal
-        if stake <= 0:
+        try:
+            stake = round(float(stake), 2)
+        except Exception:
+            stake = None
+        # Do NOT clamp to balance here — caller shows "Low balance"
+        if stake is not None and stake <= 0:
             stake = None
     return stake, n, need, crazy
 
@@ -1101,13 +1103,20 @@ def game_emoji_start(chat_id, fu, game, args, private, target_uid=None, reply_to
         return send(chat_id, e("lock") + " Arcade maintenance")
     if game in (d["settings"].get("disabled_games") or []):
         return send(chat_id, e("lock") + " " + game + " under maintenance")
-    stake, n, need, crazy = parse_stake(args, float(u.get("balance") or 0))
+    bal_now = float(u.get("balance") or 0)
+    stake, n, need, crazy = parse_stake(args, bal_now)
     if not stake:
         return send(chat_id, e("game") + " /" + game + " 10\n/" + game + " all · /" + game + " half\n/" + game + " 50 2d2w · crazy\n" + JACKPOT_TAG)
-    if stake < float(d["settings"].get("minBet") or 10):
-        return send(chat_id, e("no") + " Min bet " + fmt(d["settings"].get("minBet") or 10))
-    if float(u.get("balance") or 0) < stake:
-        return send(chat_id, e("no") + " Low balance. Have " + fmt(u.get("balance")))
+    min_bet = float(d["settings"].get("minBet") or 10)
+    if stake < min_bet:
+        return send(chat_id, e("no") + " Min bet " + fmt(min_bet))
+    if bal_now < stake:
+        return send(chat_id, qbox(
+            e("no") + " <b>Insufficient balance</b>\n"
+            + "Need: <b>" + fmt(stake) + "</b>\n"
+            + "Have: <b>" + fmt(bal_now) + "</b>\n"
+            + "Deposit first → /bal"
+        ), reply_markup=kb([[btn("Deposit", "deposit", "success", pe="deposit")]]))
 
     # Detect if user already set mode via 2d2w style
     mode_set = any(re.search(r"\d+d\d+w", str(a).lower()) for a in (args or []))
@@ -3963,11 +3972,31 @@ def handle_callback(cq):
         ]))
 
     if data == "wallet":
+        rk = "Member"
+        w = float(u.get("wagered") or 0)
+        if w >= 50000: rk = "VIP 3"
+        elif w >= 20000: rk = "VIP 2"
+        elif w >= 5000: rk = "VIP 1"
         return menu_edit(
-            e("wallet") + " <b>Wallet</b>\nBalance: <b>" + fmt(u.get("balance")) + "</b>\nWagered: " + fmt(u.get("wagered")),
+            e("wallet") + " <b>WALLET</b>\n"
+            + e("money") + " Balance <b>" + fmt(u.get("balance")) + "</b>\n"
+            + e("chart") + " Wagered <b>" + fmt(w) + "</b>\n"
+            + e("crown") + " " + rk + " · " + (u.get("currency") or "INR"),
             kb([
-                [btn("Deposit", "deposit", "success", pe="deposit"), btn("Withdraw", "withdraw", "danger", pe="withdraw")],
-                [btn("Home", "home", pe="home")],
+                [btn("Deposit", "deposit", "success", pe="deposit"), btn("Withdraw", "withdraw", "primary", pe="wallet")],
+                [btn("Currency", "currency", pe="coin"), btn("Affiliate", "affiliate", pe="gift")],
+                [btn("History", "history", pe="book"), btn("Games", "play", "primary", pe="game")],
+            ]))
+    if data == "bal":
+        bal = float(u.get("balance") or 0)
+        usd = bal / float(d.get("settings", {}).get("usdt_rate") or 90)
+        return menu_edit(
+            qbox(
+                e("money") + " Bal: <b>" + fmt(bal) + "</b> ≈ ($" + f"{usd:.2f}" + ")\n"
+                + e("star") + " Points: " + str(int(u.get("points") or u.get("games") or 0))
+            ),
+            kb([
+                [btn("Deposit", "deposit", "success", pe="deposit"), btn("Withdraw", "withdraw", "primary", pe="wallet")],
             ]))
 
     if data == "play":
