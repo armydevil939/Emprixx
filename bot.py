@@ -2037,24 +2037,62 @@ def _norm_name(s):
     return s
 
 
+def _tipper_matches_user(tipper_name, fu, d=None):
+    """True only if CWallet tipper is this Telegram user (username / name)."""
+    if not tipper_name or not fu:
+        return False
+    nt = _norm_name(tipper_name)
+    if not nt:
+        return False
+    candidates = [
+        fu.get("username") or "",
+        fu.get("first_name") or "",
+        fu.get("last_name") or "",
+        ((fu.get("first_name") or "") + (fu.get("last_name") or "")),
+    ]
+    # also stored profile
+    if d:
+        uu = (d.get("users") or {}).get(str(fu.get("id"))) or {}
+        candidates += [uu.get("username") or "", uu.get("name") or "", uu.get("first_name") or ""]
+    for c in candidates:
+        nc = _norm_name(c)
+        if not nc:
+            continue
+        if nc == nt or (len(nt) >= 3 and (nt in nc or nc in nt)):
+            return True
+    return False
+
+
 def _credit_from_tip_text(text, d, credit_uid, chat_id, fu=None):
-    """Parse tip-details text and credit user. Used when user REPLIES to CWallet msg."""
+    """Credit only if tipper name matches the verifying user (anti-steal)."""
     parsed = _parse_cwallet_tip(text)
     if not parsed:
         return False
     amt = float(parsed.get("amount") or 0)
     if amt <= 0:
         return False
-    # Prefer pending amount match for this uid
+    tipper = (parsed.get("tipper") or "").strip()
+
+    # SECURITY: tipper in CWallet text must be this user
+    if tipper:
+        if not fu or not _tipper_matches_user(tipper, fu, d):
+            send(chat_id, e("no") + " This tip belongs to <b>" + str(tipper) + "</b>.\nOnly that user can verify.")
+            return True
+    else:
+        # no tipper parsed — only allow if this user has matching pending
+        pend = (d.get("cw_pending") or {}).get(str(credit_uid))
+        if not pend or abs(float(pend.get("amt") or 0) - amt) > 0.05:
+            send(chat_id, e("no") + " Tipper unknown — type <code>Cc " + str(amt) + " usdt</code> first, then verify.")
+            return True
+
+    # Optional: pending amount should match when present
     pend = (d.get("cw_pending") or {}).get(str(credit_uid))
-    if pend:
-        try:
-            if abs(float(pend.get("amt") or 0) - amt) > 0.05:
-                # amount mismatch — still allow if close tip
-                pass
-        except Exception:
-            pass
-    h = "reply|" + str(credit_uid) + "|" + str(amt) + "|" + str(int(time.time() // 30))
+    if pend and abs(float(pend.get("amt") or 0) - amt) > 0.05:
+        send(chat_id, e("no") + " Amount mismatch. Pending " + str(pend.get("amt")) + " USDT vs tip " + str(amt))
+        return True
+
+    # global dedupe by tip content (one tip → one credit ever)
+    h = "tip|" + str(amt) + "|" + _norm_name(tipper) + "|" + (parsed.get("raw") or "")[:80]
     seen = d.setdefault("cw_seen", [])
     if h in seen:
         send(chat_id, e("no") + " Already credited.")
@@ -2062,24 +2100,18 @@ def _credit_from_tip_text(text, d, credit_uid, chat_id, fu=None):
     seen.append(h)
     d["cw_seen"] = seen[-500:]
     d.get("cw_pending", {}).pop(str(credit_uid), None)
+
     inr = credit_cwallet(d, credit_uid, amt, "reply_tip")
-    who = ""
-    if fu and fu.get("username"):
-        who = "@" + fu["username"]
+    who = ("@" + fu["username"]) if fu and fu.get("username") else str(tipper or credit_uid)
+    # ONE message only
     send(chat_id, qbox(
         e("ok") + " <b>Deposit received</b>\n"
-        + "From: CWallet (USDT)\n"
-        + "Amount: <b>" + str(amt) + " USDT</b>\n"
-        + "Value: ≈ <b>" + fmt(inr) + "</b>\n"
-        + ("Credited to " + who if who else "")
+        + "Amount: <b>" + str(amt) + " USDT</b> ≈ <b>" + fmt(inr) + "</b>\n"
+        + "Credited to " + who
     ))
-    try:
-        send(int(credit_uid), e("ok") + " <b>Deposit received</b>\n" + str(amt) + " USDT → <b>" + fmt(inr) + "</b>")
-    except Exception:
-        pass
     logc = (d.get("settings") or {}).get("logger_chat")
     if logc:
-        send(logc, e("deposit") + " CW reply-credit +" + fmt(inr) + " → " + str(credit_uid))
+        send(logc, e("deposit") + " CW +" + fmt(inr) + " → " + str(credit_uid) + " (" + str(tipper) + ")")
     return True
 
 
@@ -3874,7 +3906,8 @@ def handle_callback(cq):
 
     # ---- global: not your button (any personal panel / menu) ----
     PUBLIC_CB = (
-        "acceptpvp_", "rainclaim_", "jp_join", "depok_", "depno_", "wdok_", "wdno_",
+        "acceptpvp_", "rainclaim_", "jp_join", "ctjoin_", "ct_none",
+        "depok_", "depno_", "wdok_", "wdno_",
     )
     is_public = any(data.startswith(p) or data == p.rstrip("_") for p in PUBLIC_CB)
     if mid_msg and not is_public:
