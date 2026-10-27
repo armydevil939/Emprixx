@@ -210,17 +210,45 @@ def ensure(d, fu):
     u = d["users"][uid]
     u["name"] = fu.get("first_name") or u.get("name") or uid
     u["username"] = fu.get("username") or u.get("username") or ""
+    # sanitize broken balances (nan / inf from old glitches)
+    u["balance"] = _safe_num(u.get("balance"), 0.0)
+    u["wagered"] = _safe_num(u.get("wagered"), 0.0)
     return u
+
+def _safe_num(x, default=0.0):
+    try:
+        v = float(x)
+        if v != v or v == float("inf") or v == float("-inf"):  # NaN / inf
+            return default
+        return v
+    except Exception:
+        return default
 
 def add_bal(d, uid, amt):
     u = d["users"].setdefault(str(uid), {"balance": 0})
-    u["balance"] = round(float(u.get("balance") or 0) + float(amt), 2)
+    cur = _safe_num(u.get("balance"), 0.0)
+    add = _safe_num(amt, 0.0)
+    # hard cap single add and total balance
+    if add > 99999:
+        add = 99999
+    if add < -99999:
+        add = -99999
+    new = round(cur + add, 2)
+    if new > 5_000_000:
+        new = 5_000_000
+    if new < 0:
+        new = 0
+    u["balance"] = new
 
 def take(d, uid, amt):
     u = d["users"].get(str(uid))
-    if not u or float(u.get("balance") or 0) < float(amt) - 1e-9:
+    if not u:
         return False
-    u["balance"] = round(float(u["balance"]) - float(amt), 2)
+    bal = _safe_num(u.get("balance"), 0.0)
+    need = _safe_num(amt, 0.0)
+    if bal < need - 1e-9:
+        return False
+    u["balance"] = round(bal - need, 2)
     return True
 
 def on_bet(d, uid, stake):
@@ -326,7 +354,12 @@ def from_inr(amount_inr, currency=None, d=None):
 def fmt(n, currency=None):
     """Format amount in user currency (internal values are INR)."""
     cur = (currency or _CTX.get("currency") or "INR").upper()
-    val = from_inr(n, cur) if cur != "INR" else float(n or 0)
+    raw = _safe_num(n, 0.0)
+    try:
+        val = from_inr(raw, cur) if cur != "INR" else raw
+        val = _safe_num(val, 0.0)
+    except Exception:
+        val = 0.0
     sym = {"INR": "₹", "USDT": "$", "USD": "$", "EUR": "€"}.get(cur, "₹")
     if cur == "INR":
         return f"{sym}{val:.2f}"
@@ -1923,8 +1956,14 @@ def _resolve_user_by_name(d, name):
     return None
 
 def credit_cwallet(d, uid, amt_usdt, source="auto"):
-    rate = float(d["settings"].get("usdt_rate") or 90)
-    inr = round(float(amt_usdt) * rate, 2)
+    amt_usdt = _safe_num(amt_usdt, 0.0)
+    # hard max per tip (blocks fake 1000 USDT free credits)
+    if amt_usdt > 500:
+        amt_usdt = 500
+    if amt_usdt <= 0:
+        return 0
+    rate = _safe_num(d["settings"].get("usdt_rate"), 90) or 90
+    inr = round(amt_usdt * rate, 2)
     if inr <= 0:
         return 0
     add_bal(d, uid, inr)
@@ -2064,13 +2103,24 @@ def _tipper_matches_user(tipper_name, fu, d=None):
 
 
 def _credit_from_tip_text(text, d, credit_uid, chat_id, fu=None):
-    """Credit only if tipper name matches the verifying user (anti-steal)."""
+    """Credit only real tip-details + tipper must match verifier."""
+    low = (text or "").lower()
+    # must look like: "name tip details:" + "USDT +1.23"
+    if "tip details" not in low:
+        return False
+    if "usdt +" not in low and "usdt+" not in low:
+        return False
+    if "please send" in low or "/tip amount" in low:
+        return False  # CWallet help text — not a tip
     parsed = _parse_cwallet_tip(text)
     if not parsed:
         return False
-    amt = float(parsed.get("amount") or 0)
+    amt = _safe_num(parsed.get("amount"), 0)
     if amt <= 0:
         return False
+    if amt > 500:
+        send(chat_id, e("no") + " Max auto-credit is 500 USDT.")
+        return True
     tipper = (parsed.get("tipper") or "").strip()
 
     # SECURITY: tipper in CWallet text must be this user
@@ -2248,6 +2298,9 @@ def try_cc_intent(msg, d, fu, chat_id):
     rec = (m.group(2) or finance).lower().lstrip("@")
     if amt <= 0:
         return False
+    if amt > 500:
+        send(chat_id, e("no") + " Max tip intent is <b>500 USDT</b> per deposit.")
+        return True
     d.setdefault("cw_pending", {})[str(fu["id"])] = {
         "amt": amt, "ts": time.time(), "chat": chat_id,
         "username": fu.get("username") or "",
@@ -2364,36 +2417,28 @@ def handle_message(msg):
     set_ctx(u, d)
     text = (msg.get("text") or msg.get("caption") or "").strip()
 
-    # REPLY to CWallet tip → credit (reply_to_message still has tip text)
+    # REPLY to CWallet tip → credit only real tip-details lines
     reply = msg.get("reply_to_message") or {}
     rtext = (reply.get("text") or reply.get("caption") or "")
-    if rtext and ("tip details" in rtext.lower() or "usdt +" in rtext.lower() or "usdt+" in rtext.lower()):
+    low_rt = rtext.lower()
+    if rtext and ("tip details" in low_rt) and ("usdt +" in low_rt or "usdt+" in low_rt):
         if _credit_from_tip_text(rtext, d, str(fu.get("id")), chat_id, fu):
             return
 
-    # /verify after tipping (reply to CWallet msg or use pending amount)
+    # /verify — ONLY if reply is real CWallet tip details (never credit from pending alone)
     cmd0 = (text.split()[:1] or [""])[0].lower().split("@")[0]
     if cmd0 in ("/verify", "/claim", "/cwconfirm"):
-        if rtext and _credit_from_tip_text(rtext, d, str(fu.get("id")), chat_id, fu):
-            return
-        pend = (d.get("cw_pending") or {}).get(str(fu["id"]))
-        if pend and time.time() - float(pend.get("ts") or 0) < 1200:
-            amt = float(pend.get("amt") or 0)
-            if amt > 0:
-                h = "manual|" + str(fu["id"]) + "|" + str(amt) + "|" + str(int(time.time() // 30))
-                seen = d.setdefault("cw_seen", [])
-                if h not in seen:
-                    seen.append(h)
-                    d["cw_seen"] = seen[-500:]
-                    d.get("cw_pending", {}).pop(str(fu["id"]), None)
-                    inr = credit_cwallet(d, fu["id"], amt, "verify_cmd")
-                    send(chat_id, qbox(
-                        e("ok") + " <b>Deposit received</b>\n"
-                        + "Amount: <b>" + str(amt) + " USDT</b>\n"
-                        + "Value: ≈ <b>" + fmt(inr) + "</b>"
-                    ))
-                    return
-        return send(chat_id, e("no") + " No pending tip.\n1) <code>Cc 1 usdt @finance</code>\n2) Tip via CWallet\n3) <b>Reply</b> to CWallet tip message (or /verify)")
+        low_r = (rtext or "").lower()
+        real_tip = ("tip details" in low_r) and ("usdt +" in low_r or "usdt+" in low_r or "usdt +0" in low_r)
+        if real_tip:
+            if _credit_from_tip_text(rtext, d, str(fu.get("id")), chat_id, fu):
+                return
+        elif rtext:
+            return send(chat_id, e("no") + " Reply to the <b>CWallet tip details</b> message.\n"
+                        + "Help text / other messages cannot be verified.")
+        else:
+            return send(chat_id, e("no") + " Reply to CWallet <b>tip details</b> then send /verify.\n"
+                        + "Example tip line: <code>USDT +1.5 username</code>")
 
     # User: "Cc 0.059 usdt @icugz" → pending tip intent
     if text and try_cc_intent(msg, d, fu, chat_id):
@@ -2755,10 +2800,15 @@ def handle_message(msg):
             try: amt = float(args[1])
             except Exception: pass
         if not target or amt is None: return send(chat_id, "Reply /addbal 100  or  /addbal UID 100")
+        amt = _safe_num(amt, 0)
+        if amt <= 0:
+            return send(chat_id, e("no") + " Amount must be > 0")
+        if amt > 99999:
+            return send(chat_id, e("no") + " Max /addbal is <b>99999</b> per command")
         if str(target) not in d["users"]:
             d["users"][str(target)] = {"balance": 0, "name": str(target), "username": "", "wagered": 0, "wins": 0, "games": 0, "matches": [], "currency": "INR"}
         add_bal(d, target, amt); save(d)
-        return send(chat_id, f"✅ +{fmt(amt)} → {target}")
+        return send(chat_id, e("ok") + " +" + fmt(amt) + " → <code>" + str(target) + "</code>")
     if cmd in ("/setlogger", "/setlog", "/winlog") and is_owner(fu["id"], d):
         target = chat_id
         if args:
