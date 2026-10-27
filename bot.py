@@ -1959,10 +1959,58 @@ def _norm_name(s):
     return s
 
 
+def _credit_from_tip_text(text, d, credit_uid, chat_id, fu=None):
+    """Parse tip-details text and credit user. Used when user REPLIES to CWallet msg."""
+    parsed = _parse_cwallet_tip(text)
+    if not parsed:
+        return False
+    amt = float(parsed.get("amount") or 0)
+    if amt <= 0:
+        return False
+    # Prefer pending amount match for this uid
+    pend = (d.get("cw_pending") or {}).get(str(credit_uid))
+    if pend:
+        try:
+            if abs(float(pend.get("amt") or 0) - amt) > 0.05:
+                # amount mismatch — still allow if close tip
+                pass
+        except Exception:
+            pass
+    h = "reply|" + str(credit_uid) + "|" + str(amt) + "|" + str(int(time.time() // 30))
+    seen = d.setdefault("cw_seen", [])
+    if h in seen:
+        send(chat_id, e("no") + " Already credited.")
+        return True
+    seen.append(h)
+    d["cw_seen"] = seen[-500:]
+    d.get("cw_pending", {}).pop(str(credit_uid), None)
+    inr = credit_cwallet(d, credit_uid, amt, "reply_tip")
+    who = ""
+    if fu and fu.get("username"):
+        who = "@" + fu["username"]
+    send(chat_id, qbox(
+        e("ok") + " <b>Deposit received</b>\n"
+        + "From: CWallet (USDT)\n"
+        + "Amount: <b>" + str(amt) + " USDT</b>\n"
+        + "Value: ≈ <b>" + fmt(inr) + "</b>\n"
+        + ("Credited to " + who if who else "")
+    ))
+    try:
+        send(int(credit_uid), e("ok") + " <b>Deposit received</b>\n" + str(amt) + " USDT → <b>" + fmt(inr) + "</b>")
+    except Exception:
+        pass
+    logc = (d.get("settings") or {}).get("logger_chat")
+    if logc:
+        send(logc, e("deposit") + " CW reply-credit +" + fmt(inr) + " → " + str(credit_uid))
+    return True
+
+
 def try_cwallet_auto_message(msg, d):
     """
     Axom-style AUTO verify (no forward).
     Any "tip details" + USDT message → match pending amount → credit.
+    NOTE: Telegram Bot API usually does NOT deliver messages from other bots.
+    Primary path is reply-to-tip via _credit_from_tip_text.
     """
     text = (msg.get("text") or msg.get("caption") or "")
     if not text:
@@ -2112,7 +2160,9 @@ def try_cc_intent(msg, d, fu, chat_id):
     save(d)
     send(chat_id, qbox(
         e("ok") + " <b>Tip intent locked:</b> " + str(amt) + " USDT → @" + rec + "\n"
-        + "Send the tip via CWallet — verification is automatic."
+        + "1) Tip via CWallet\n"
+        + "2) <b>Reply</b> to the CWallet tip message (or send /verify)\n"
+        + e("warn") + " Bot API cannot see other bots — reply is required."
     ))
     return True
 
@@ -2197,16 +2247,48 @@ def handle_message(msg):
     fu = msg.get("from") or {}
     if not fu.get("id"): return
     d = load()
-    # Auto CWallet when tip bot posts in group (Axom style — no forward)
+    # Direct CWallet post (Bot API often does NOT deliver other bots' messages)
     if try_cwallet_auto_message(msg, d):
         return
     u = ensure(d, fu); save(d)
     set_ctx(u, d)
     text = (msg.get("text") or msg.get("caption") or "").strip()
-    # User: "Cc 5.26 usdt @Emprixx_finance" → pending tip intent
+
+    # REPLY to CWallet tip → credit (reply_to_message still has tip text)
+    reply = msg.get("reply_to_message") or {}
+    rtext = (reply.get("text") or reply.get("caption") or "")
+    if rtext and ("tip details" in rtext.lower() or "usdt +" in rtext.lower() or "usdt+" in rtext.lower()):
+        if _credit_from_tip_text(rtext, d, str(fu.get("id")), chat_id, fu):
+            return
+
+    # /verify after tipping (reply to CWallet msg or use pending amount)
+    cmd0 = (text.split()[:1] or [""])[0].lower().split("@")[0]
+    if cmd0 in ("/verify", "/claim", "/cwconfirm"):
+        if rtext and _credit_from_tip_text(rtext, d, str(fu.get("id")), chat_id, fu):
+            return
+        pend = (d.get("cw_pending") or {}).get(str(fu["id"]))
+        if pend and time.time() - float(pend.get("ts") or 0) < 1200:
+            amt = float(pend.get("amt") or 0)
+            if amt > 0:
+                h = "manual|" + str(fu["id"]) + "|" + str(amt) + "|" + str(int(time.time() // 30))
+                seen = d.setdefault("cw_seen", [])
+                if h not in seen:
+                    seen.append(h)
+                    d["cw_seen"] = seen[-500:]
+                    d.get("cw_pending", {}).pop(str(fu["id"]), None)
+                    inr = credit_cwallet(d, fu["id"], amt, "verify_cmd")
+                    send(chat_id, qbox(
+                        e("ok") + " <b>Deposit received</b>\n"
+                        + "Amount: <b>" + str(amt) + " USDT</b>\n"
+                        + "Value: ≈ <b>" + fmt(inr) + "</b>"
+                    ))
+                    return
+        return send(chat_id, e("no") + " No pending tip.\n1) <code>Cc 1 usdt @finance</code>\n2) Tip via CWallet\n3) <b>Reply</b> to CWallet tip message (or /verify)")
+
+    # User: "Cc 0.059 usdt @icugz" → pending tip intent
     if text and try_cc_intent(msg, d, fu, chat_id):
         return
-    # CWallet forward still supported as backup
+    # Forward backup
     if msg.get("forward_date") or msg.get("forward_from") or msg.get("forward_origin"):
         if try_cwallet_forward(msg, d, fu, chat_id):
             return
