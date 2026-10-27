@@ -26,33 +26,37 @@ DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)) or ".", "data.jso
 
 PE = {
     # core status
-    "ok": "6267008582294705964",       # ✅ ZEROX
-    "ok2": "6269285391702954932",      # ✅ Premium_wale
-    "no": "6269362834258269327",       # ❌ Premium_wale
-    "check": "6267225207560214192",    # ✔️
-    "warn": "6267039884016358504",     # ⚠️
-    "lock": "6282846669335702032",     # 🔒
-    "fire": "6266955436369385728",     # 🔥
-    "bolt": "6267107057304868214",     # ⚡
-    "sparkle": "6285088169817805553",  # ✨
-    "party": "6267117038808870117",    # 🎉
-    # money / finance pack
-    "money": "5287231198098117669",    # 💰 Finance
-    "cash": "5197434882321567830",     # 💵 Finance
-    "coin": "5377505475015235101",     # 🪙 Finance
-    "wallet": "5445221832074483553",   # 💼 Finance
-    "credit": "5445353829304387411",   # 💳 Finance
-    "deposit": "5443127283898405358",  # 📥 Finance
-    "withdraw": "5445355530111437729", # 📤 Finance
-    "bank": "5332455502917949981",     # 🏦 Finance
-    "chart": "5190806721286657692",    # 📊 Finance
-    "rocket": "5195033767969839232",   # 🚀 Finance
-    "shield": "5197288647275071607",   # 🛡 Finance
-    "target": "5310278924616356636",   # 🎯 Finance
-    "star": "6266969287638913443",     # ⭐
-    "diamond": "6264791387032523779",  # 💎 ZEROX
-    "trophy": "6266973397922616654",   # 🏆
-    "crown": "6271665430650163493",    # 👑 Premium_wale
+    "ok": "5424998570539373838",       # ✅ WAO
+    "ok2": "4924700194123023462",      # ✔️ Major
+    "no": "5161208387957950108",       # ❌ Major
+    "check": "4924700194123023462",
+    "warn": "5197418402532054381",     # ❗️ WAO
+    "lock": "6282846669335702032",
+    "fire": "5197608927281307290",     # 🔥 WAO
+    "bolt": "6267107057304868214",
+    "sparkle": "6285088169817805553",
+    "party": "5197716885579257752",    # 🥳 WAO
+    # money / Major pack
+    "money": "4965219701572503640",    # 💰 Major
+    "cash": "5053166660265968568",     # 💲 Major
+    "coin": "4918300654197277832",     # 🪙 Major
+    "wallet": "4972482444025398275",   # 👛 Major
+    "credit": "4907231385309152742",   # 🪪 Major
+    "deposit": "5008248651038852115",  # 🫴 Major
+    "withdraw": "5445355530111437729",
+    "bank": "5332455502917949981",
+    "chart": "5071491301443110142",    # 📊 Major
+    "rocket": "5145427681680032825",   # 🚀 Major
+    "shield": "5197288647275071607",
+    "target": "5310278924616356636",
+    "star": "4983748881977181112",     # ⭐ Major
+    "diamond": "5197380108603645661",  # 💎 WAO
+    "trophy": "5197476861331922804",   # 🏆 WAO
+    "crown": "5197572355634781614",    # 👑 WAO
+    "gem": "5197380108603645661",
+    "green": "5195245565692106757",
+    "red": "5197644042933917422",
+    "white": "5197330244033337856",
     "gift": "6269214795325510848",     # 🎁
     "bell": "6264510702329797113",     # 🔔
     "pin": "6267172559851099903",      # 📌
@@ -85,13 +89,19 @@ PE = {
     "book": "5039826874096681939",     # 🔖
     "clap": "5471921242866981303",
     # games
-    "game": "5361741454685256344",
+    "game": "5001281806062847125",     # 🎮 Major
     "dice": "6305357340258345030",
     "dart": "5350460637182993292",
-    "slot": "6305323358477100686",
-    "bomb": "6296470906894029416",     # 💣 Premium_wale
-    "card": "6269504804402238187",     # 🃏 Premium_wale
+    "slot": "5102856631562011824",     # 🎰 Major
+    "bomb": "6296470906894029416",
+    "card": "6269504804402238187",
     "chicken": "5283202076392827429",
+    "robot": "5197505371324831655",    # 🤖 WAO
+    "handshake": "5197178386874652340",
+    "hundred": "5197649338628596046",
+    "top": "5197630509491968339",
+    "eyes": "5197499598888785929",
+    "heart": "5422703138152924749",
 }
 
 EM = {"dice": "🎲", "dart": "🎯", "bowl": "🎳", "bask": "🏀", "slot": "🎰", "coin": "🪙"}
@@ -1098,33 +1108,60 @@ def game_emoji_start(chat_id, fu, game, args, private, target_uid=None, reply_to
         return send(chat_id, e("no") + " Min bet " + fmt(d["settings"].get("minBet") or 10))
     if float(u.get("balance") or 0) < stake:
         return send(chat_id, e("no") + " Low balance. Have " + fmt(u.get("balance")))
+
+    # Detect if user already set mode via 2d2w style
+    mode_set = any(re.search(r"\d+d\d+w", str(a).lower()) for a in (args or []))
+
     mid = rid()
     emoji = EM.get(game, "🎲")
     d["matches"][mid] = {
         "uid": str(fu["id"]), "chat": chat_id, "game": game, "emoji": emoji,
         "stake": stake, "n": n, "need": need, "crazy": crazy, "sa": 0, "sb": 0,
-        "wait": "mode", "all_bet": any(str(a).lower() in ("all", "max", "full") for a in args),
+        "wait": "setup_n" if not mode_set else ("pvp_locked" if target_uid else "pvp"),
+        "all_bet": any(str(a).lower() in ("all", "max", "full") for a in args),
         "player_name": fu.get("first_name") or str(fu["id"]),
         "player_un": fu.get("username") or "",
         "is_private": private, "pending_bot": None, "opp": None, "locked": False,
         "throws_a": [], "throws_b": [],
         "only_opp": str(target_uid) if target_uid else None,
+        "cmd_msg": reply_to,
     }
     save(d)
+    who = safe_name(fu.get("first_name"), "Player")
+    un = ("@" + fu["username"]) if fu.get("username") else ""
+    tag = '<a href="tg://user?id=' + str(fu["id"]) + '">' + who + "</a>"
+
+    # Wizard: choose throws per round (1/2/3)
+    if not mode_set:
+        mid_panel = send(chat_id,
+            qbox(
+                emoji + " <b>" + game.upper() + "</b> · " + tag + " " + un + "\n"
+                + e("money") + " Stake: <b>" + fmt(stake) + "</b>\n\n"
+                + e("dice") + " How many throws each round?"
+            ),
+            reply_markup=kb([
+                [btn("1 throw", "setupn_" + mid + "_1", "primary", pe="dice"),
+                 btn("2 throws", "setupn_" + mid + "_2", "primary", pe="dice"),
+                 btn("3 throws", "setupn_" + mid + "_3", "primary", pe="dice")],
+                [btn("Cancel", "cancel_" + mid, "danger", pe="no")],
+            ]),
+            **({"reply_to_message_id": reply_to} if reply_to else {}))
+        if mid_panel:
+            d["matches"][mid]["panel_msg"] = mid_panel
+            save(d)
+        return mid_panel
+
     mode_txt = str(n) + "d" + str(need) + "w" + (" · CRAZY" if crazy else "")
-    # Reply-to user → locked PvP challenge
     if target_uid:
         d["matches"][mid]["wait"] = "pvp_locked"
-        d["matches"][mid]["only_opp"] = str(target_uid)
         save(d)
-        who = safe_name(fu.get("first_name"), "Player")
-        un = ("@" + fu["username"]) if fu.get("username") else ""
         mid_panel = send(chat_id,
-            emoji + " <b>PvP CHALLENGE</b> " + JACKPOT_TAG + "\n"
-            + "👤 " + who + " " + un + "\n"
-            + "→ target <code>" + str(target_uid) + "</code>\n"
-            + "Stake: <b>" + fmt(stake) + "</b> · " + mode_txt + "\n"
-            + "#" + mid + "\nOnly that user can accept.",
+            qbox(
+                emoji + " <b>PvP CHALLENGE</b>\n"
+                + tag + " " + un + "\n"
+                + e("money") + " Stake: <b>" + fmt(stake) + "</b> · " + mode_txt + "\n"
+                + "Only target can accept."
+            ),
             reply_markup=kb([
                 [btn("Accept", "acceptpvp_" + mid, "success", pe="ok")],
                 [btn("Cancel", "cancel_" + mid, "danger", pe="no")],
@@ -1132,20 +1169,17 @@ def game_emoji_start(chat_id, fu, game, args, private, target_uid=None, reply_to
             **({"reply_to_message_id": reply_to} if reply_to else {}))
         if mid_panel:
             d["matches"][mid]["panel_msg"] = mid_panel
-            d["matches"][mid]["cmd_msg"] = reply_to
             save(d)
         return mid_panel
-    # Open for anyone to accept — no extra "Open PvP" step
+
     d["matches"][mid]["wait"] = "pvp"
     save(d)
-    who = safe_name(fu.get("first_name"), "Player")
-    un = ("@" + fu["username"]) if fu.get("username") else ""
     mid_panel = send(chat_id,
-        emoji + " <b>" + game.upper() + "</b> " + JACKPOT_TAG + "\n"
-        + "👤 <b>" + who + "</b> " + un + "\n"
-        + "Stake: <b>" + fmt(stake) + "</b> · " + mode_txt + "\n"
-        + "#" + mid + "\n\n"
-        + e("users") + " Anyone can <b>Accept</b> · or play <b>Vs Bot</b>",
+        qbox(
+            emoji + " <b>" + game.upper() + "</b>\n"
+            + tag + " " + un + "\n"
+            + e("money") + " Stake: <b>" + fmt(stake) + "</b> · " + mode_txt
+        ),
         reply_markup=kb([
             [btn("Accept", "acceptpvp_" + mid, "success", pe="ok"),
              btn("Vs Bot", "vsbot_" + mid, "primary", pe="robot")],
@@ -1154,7 +1188,6 @@ def game_emoji_start(chat_id, fu, game, args, private, target_uid=None, reply_to
         **({"reply_to_message_id": reply_to} if reply_to else {}))
     if mid_panel:
         d["matches"][mid]["panel_msg"] = mid_panel
-        d["matches"][mid]["cmd_msg"] = reply_to
         save(d)
     return mid_panel
 
@@ -1165,11 +1198,28 @@ def qbox(inner: str) -> str:
     return "<blockquote>" + inner + "</blockquote>"
 
 
+def _tag_user(m):
+    """HTML mention for player."""
+    uid = m.get("uid")
+    name = safe_name(m.get("player_name"), "Player")
+    un = m.get("player_un") or ""
+    if uid:
+        return '<a href="tg://user?id=' + str(uid) + '">' + name + "</a>"
+    if un:
+        return "@" + un
+    return name
+
+
+def _score_dots(won, need):
+    """●●○ style score."""
+    out = ""
+    for i in range(int(need or 1)):
+        out += e("green") if i < int(won or 0) else e("white")
+    return out
+
+
 def finish_round(chat, m, player_pts, bot_pts, pvp=False, silent=False):
-    """
-    STRICT score result — ONE compact message (Axom style).
-    Normal: higher wins. Crazy: lower wins.
-    """
+    """WorthWin-style round card · reply to player command."""
     try:
         player_pts = int(player_pts)
         bot_pts = int(bot_pts)
@@ -1184,37 +1234,40 @@ def finish_round(chat, m, player_pts, bot_pts, pvp=False, silent=False):
     else:
         winner = "player" if player_pts > bot_pts else "bot"
 
-    if pvp:
-        a_name = str(m.get("player_name") or "Host")
-        b_name = str(m.get("opp_name") or "Opp")
-    else:
-        a_name, b_name = "YOU", "BOT"
+    a_name = str(m.get("player_name") or "Player")
+    b_name = str(m.get("opp_name") or "Bot") if pvp else "Bot"
+    need = int(m.get("need") or 1)
+    rnd = int(m.get("sa") or 0) + int(m.get("sb") or 0) + 1
 
     if winner == "player":
         m["sa"] = int(m.get("sa") or 0) + 1
-        flag = e("ok")
-        who = a_name
+        line = e("ok") + " <b>" + a_name + "</b> takes the round!"
     elif winner == "bot":
         m["sb"] = int(m.get("sb") or 0) + 1
-        flag = e("no")
-        who = b_name
+        line = e("no") + " <b>" + b_name + "</b> takes the round!"
     else:
-        flag = e("refresh")
-        who = "DRAW"
+        line = e("refresh") + " <b>DRAW</b> this round"
 
     if not silent:
+        g = str(m.get("game") or "dice")
         body = (
-            flag + " <b>" + a_name + "</b> " + str(player_pts)
-            + "  ·  <b>" + b_name + "</b> " + str(bot_pts) + "\n"
-            + "Score <b>" + str(m.get("sa") or 0) + " — " + str(m.get("sb") or 0) + "</b>"
-            + (" · Round → " + who if winner != "draw" else " · Draw")
+            e("target") + " <b>Round " + str(rnd) + "</b> · highest total wins\n"
+            + e("ok") + " " + _tag_user(m) + " <b>" + str(player_pts) + "</b>\n"
+            + e("robot") + " " + b_name + " <b>" + str(bot_pts) + "</b>\n\n"
+            + e("trophy") + " Score · first to " + str(need) + "\n"
+            + _tag_user(m) + " " + _score_dots(m.get("sa"), need) + " <b>" + str(m.get("sa") or 0) + "</b>\n"
+            + b_name + " " + _score_dots(m.get("sb"), need) + " <b>" + str(m.get("sb") or 0) + "</b>\n\n"
+            + line
         )
-        send(chat, qbox(body))
+        kw = {}
+        if m.get("cmd_msg"):
+            kw["reply_to_message_id"] = m["cmd_msg"]
+        send(chat, qbox(body), **kw)
     return winner
 
 
 def settle_match(mid, m):
-    """ONE final result message only — no spam."""
+    """WorthWin final card — YOU WON / YOU LOST with balance."""
     d = load()
     d.get("matches", {}).pop(mid, None)
     chat = m.get("chat")
@@ -1222,40 +1275,48 @@ def settle_match(mid, m):
     psb = int(m.get("sb") or 0)
     gname = str(m.get("game") or "dice").upper()
     pname = str(m.get("player_name") or "Player")
+    stake = float(m.get("stake") or 0)
+    kw = {}
+    if m.get("cmd_msg"):
+        kw["reply_to_message_id"] = m["cmd_msg"]
 
     if psa > psb:
-        pay = round(float(m["stake"]) * (2 - HOUSE), 2)
+        pay = round(stake * (2 - HOUSE), 2)
         add_bal(d, m["uid"], pay)
-        log_game(d, m["uid"], m.get("game"), m["stake"], True, pay)
+        log_game(d, m["uid"], m.get("game"), stake, True, pay)
         save(d)
+        u = (d.get("users") or {}).get(str(m["uid"])) or {}
+        mult = round(pay / stake, 2) if stake else 0
         body = (
-            e("ok") + " <b>\"" + pname + "\"</b> won " + fmt(pay) + "\n"
-            + "<b>\"" + pname + "\"</b> - " + str(psa) + "\n"
-            + e("robot") + " Bot - " + str(psb) + "\n"
-            + "Game " + gname + " · " + JACKPOT_TAG
+            e("ok") + " <b>YOU WON +" + fmt(pay - stake) + "</b>\n"
+            + fmt(stake) + " → " + fmt(float(u.get("balance") or 0)) + " · " + str(mult) + "x\n\n"
+            + e("trophy") + " " + _tag_user(m) + " takes the final!\n"
+            + "Score <b>" + str(psa) + " — " + str(psb) + "</b> · " + gname + "\n"
+            + e("money") + " balance: <b>" + fmt(u.get("balance")) + "</b>"
         )
         return send(chat, qbox(body),
-                    reply_markup=kb([[btn("Again", "g_" + str(m.get("game") or "dice"), "success", pe="refresh")]]))
+                    reply_markup=kb([[btn("Again", "g_" + str(m.get("game") or "dice"), "success", pe="refresh")]]), **kw)
     if psa < psb:
-        log_game(d, m["uid"], m.get("game"), m["stake"], False, 0)
+        log_game(d, m["uid"], m.get("game"), stake, False, 0)
         save(d)
+        u = (d.get("users") or {}).get(str(m["uid"])) or {}
         body = (
-            e("no") + " <b>\"" + pname + "\"</b> lost " + fmt(m["stake"]) + "\n"
-            + "<b>\"" + pname + "\"</b> - " + str(psa) + "\n"
-            + e("robot") + " Bot - " + str(psb) + "\n"
-            + "Game " + gname + " · " + JACKPOT_TAG
+            e("no") + " <b>YOU LOST -" + fmt(stake) + "</b>\n"
+            + e("robot") + " Bot wins · Score <b>" + str(psb) + " — " + str(psa) + "</b>\n"
+            + gname + "\n"
+            + e("money") + " balance: <b>" + fmt(u.get("balance")) + "</b>"
         )
         return send(chat, qbox(body),
-                    reply_markup=kb([[btn("Retry", "g_" + str(m.get("game") or "dice"), "danger", pe="refresh")]]))
-    add_bal(d, m["uid"], float(m["stake"]))
-    log_game(d, m["uid"], m.get("game"), m["stake"], False, 0)
+                    reply_markup=kb([[btn("Retry", "g_" + str(m.get("game") or "dice"), "danger", pe="refresh")]]), **kw)
+    add_bal(d, m["uid"], stake)
+    log_game(d, m["uid"], m.get("game"), stake, False, 0)
     save(d)
     body = (
         e("refresh") + " <b>DRAW</b>  " + str(psa) + "—" + str(psb) + "\n"
-        + "Stake refunded " + fmt(m["stake"]) + "\n" + JACKPOT_TAG
+        + "Stake refunded " + fmt(stake)
     )
     return send(chat, qbox(body),
-                reply_markup=kb([[btn("Again", "g_" + str(m.get("game") or "dice"), "primary", pe="refresh")]]))
+                reply_markup=kb([[btn("Again", "g_" + str(m.get("game") or "dice"), "primary", pe="refresh")]]), **kw)
 
 
 def game_limbo(chat_id, fu, args):
@@ -1552,24 +1613,32 @@ def mines_render(chat_id, d, mid, note="", edit_id=None):
         for c in range(COLS):
             idx = r * COLS + c
             if idx in g["revealed"]:
-                lab = "💣" if g["grid"][idx] == 1 else "💎"
+                lab = "💥" if g["grid"][idx] == 1 else "💎"
             else:
                 lab = "⬜"
-            # disable clicks on already revealed by unique dead callback if not alive
             row.append(btn(lab, f"mine_{mid}_{idx}"))
         rows.append(row)
     if g.get("alive"):
-        rows.append([btn("💰 Cashout " + str(g["mult"]) + "x", f"mineout_{mid}", "success", pe="cash")])
+        rows.append([btn("Cashout " + str(g["mult"]) + "x", f"mineout_{mid}", "success", pe="money")])
     else:
         rows.append([btn("Again", "g_mines", "primary", pe="bomb")])
 
-    title = note or ("💎 Safe · <b>" + str(g["mult"]) + "x</b>" if g.get("alive") else "💥 BOOM")
-    body = (
-        e("bomb") + " <b>MINES</b> " + JACKPOT_TAG + chr(10)
-        + "Stake <b>" + fmt(g["stake"]) + "</b> · Bombs <b>" + str(g["bombs"]) + "</b>" + chr(10)
-        + "Mult <b>" + str(g["mult"]) + "x</b> · Safe tiles <b>" + str(safe) + "</b>" + chr(10)
-        + title
-    )
+    if g.get("alive"):
+        title = note or (e("diamond") + " Safe · <b>" + str(g["mult"]) + "x</b>")
+        body = (
+            e("bomb") + " <b>MINES</b>\n"
+            + "Bet: <b>" + fmt(g["stake"]) + "</b> · Mines: <b>" + str(g["bombs"]) + "</b>\n"
+            + "Safe tiles found: <b>" + str(safe) + "</b>\n"
+            + title
+        )
+    else:
+        body = (
+            e("fire") + " <b>BOOM! You hit a mine!</b>\n\n"
+            + "Bet: <b>" + fmt(g["stake"]) + "</b> · Mines: <b>" + str(g["bombs"]) + "</b>\n"
+            + "Safe tiles found: <b>" + str(safe) + "</b>\n\n"
+            + qbox(e("no") + " <b>YOU LOST -" + fmt(g["stake"]) + "</b>\n"
+                   + e("money") + " Balance updated")
+        )
     markup = kb(rows)
 
     # Prefer editing existing panel
@@ -2465,21 +2534,36 @@ def handle_message(msg):
             e("bolt") + " Throw emoji → wait → result",
         ]
         return send(chat_id, "\n".join(lines), reply_markup=play_menu())
-    if cmd in ("/bal","/balance","/wallet"):
+    if cmd in ("/bal", "/balance"):
+        # Axom-style clean balance
+        cur = u.get("currency") or "INR"
+        bal = float(u.get("balance") or 0)
+        usd = bal / float(d.get("settings", {}).get("usdt_rate") or 90)
+        text = (
+            qbox(
+                e("money") + " Bal: <b>" + fmt(bal) + "</b> ≈ ($" + f"{usd:.2f}" + ")\n"
+                + e("star") + " Points: " + str(int(u.get("points") or u.get("games") or 0))
+            )
+        )
+        return send(chat_id, text, reply_markup=kb([
+            [btn("Deposit", "deposit", "success", pe="deposit"), btn("Withdraw", "withdraw", "primary", pe="wallet")],
+        ]))
+    if cmd in ("/wallet",):
         rk = "Member"
         w = float(u.get("wagered") or 0)
         if w >= 50000: rk = "VIP 3"
         elif w >= 20000: rk = "VIP 2"
         elif w >= 5000: rk = "VIP 1"
         text = (
-            e("wallet") + " <b>Balance</b> <code>" + fmt(u["balance"]) + "</code>\n"
-            + e("chart") + " <b>Wagered</b> <code>" + fmt(u.get("wagered") or 0) + "</code>\n"
-            + e("crown") + " <b>" + rk + "</b> · INR\n"
+            e("wallet") + " <b>WALLET</b>\n"
+            + e("money") + " Balance <b>" + fmt(u["balance"]) + "</b>\n"
+            + e("chart") + " Wagered <b>" + fmt(u.get("wagered") or 0) + "</b>\n"
+            + e("crown") + " " + rk + " · " + (u.get("currency") or "INR") + "\n"
             + e("fire") + " Streak <b>" + str(int(u.get("streak") or 0)) + "</b>"
         )
         return send(chat_id, text, reply_markup=kb([
-            [btn("Deposit", "deposit", "success", pe="cash"), btn("Withdraw", "withdraw", "primary", pe="wallet")],
-            [btn("Currency", "currency", pe="money"), btn("Affiliate", "affiliate", pe="gift")],
+            [btn("Deposit", "deposit", "success", pe="deposit"), btn("Withdraw", "withdraw", "primary", pe="wallet")],
+            [btn("Currency", "currency", pe="coin"), btn("Affiliate", "affiliate", pe="gift")],
             [btn("History", "history", pe="book"), btn("Games", "play", "primary", pe="game")],
         ]))
     if cmd in ("/gamehistory", "/history", "/mygames"):
@@ -3794,18 +3878,21 @@ def handle_callback(cq):
     # match buttons contain mid after prefix
     own_prefixes = (
         "youroll_", "botfirst_", "rollbot_", "cancel_", "vsbot_", "openpvp_",
+        "setupn_", "setupw_",
         "bj_hit_", "bj_stand_", "mineout_", "chk_go", "chk_out", "chk_cancel",
         "tipok_", "tipno_", "coinbot_",
     )
     if data.startswith(own_prefixes) or data in ("chk_go", "chk_out", "chk_cancel"):
         # resolve owner from state
         owner = None
-        if data.startswith(("youroll_", "botfirst_", "rollbot_", "cancel_", "vsbot_", "openpvp_", "coinbot_")):
+        if data.startswith(("youroll_", "botfirst_", "rollbot_", "cancel_", "vsbot_", "openpvp_", "coinbot_", "setupn_", "setupw_")):
             key = data.split("_", 1)[1] if "_" in data else ""
-            # cancel_ mid, vsbot_ mid etc
-            for pref in ("youroll_", "botfirst_", "rollbot_", "cancel_", "vsbot_", "openpvp_", "coinbot_"):
+            for pref in ("youroll_", "botfirst_", "rollbot_", "cancel_", "vsbot_", "openpvp_", "coinbot_", "setupn_", "setupw_"):
                 if data.startswith(pref):
                     key = data[len(pref):]
+                    # setupn_MID_1 → mid is first segment
+                    if pref in ("setupn_", "setupw_"):
+                        key = key.split("_")[0]
                     break
             m = d.get("matches", {}).get(key)
             if m:
@@ -4150,6 +4237,83 @@ def handle_callback(cq):
               "chicken":"/chicken 10","predict":"/predict 10"}
         return handle_message({"chat":{"id":chat_id,"type":msg.get("chat",{}).get("type","private")},"from":fu,"text":mp.get(g,f"/{g} 10")})
 
+
+    # Setup wizard: throws per round
+    if data.startswith("setupn_"):
+        parts = data.split("_")
+        if len(parts) < 3:
+            return answer_cb(cq["id"], "Bad", True)
+        mid, n_s = parts[1], parts[2]
+        m = d["matches"].get(mid)
+        if not m or str(m.get("uid")) != uid:
+            return answer_cb(cq["id"], "Not yours", True)
+        try:
+            n = max(1, min(3, int(n_s)))
+        except Exception:
+            n = 1
+        m["n"] = n
+        m["wait"] = "setup_w"
+        d["matches"][mid] = m
+        save(d)
+        ok()
+        emoji = m.get("emoji") or "🎲"
+        tag = '<a href="tg://user?id=' + str(m["uid"]) + '">' + safe_name(m.get("player_name"), "Player") + "</a>"
+        text = qbox(
+            emoji + " <b>" + str(m.get("game") or "").upper() + "</b> · " + tag + "\n"
+            + e("money") + " Stake: <b>" + fmt(m["stake"]) + "</b>\n"
+            + e("dice") + " Throws: <b>" + str(n) + "</b>\n\n"
+            + e("trophy") + " First to how many round wins?"
+        )
+        markup = kb([
+            [btn("First to 1", "setupw_" + mid + "_1", "success", pe="trophy"),
+             btn("First to 2", "setupw_" + mid + "_2", "primary", pe="trophy"),
+             btn("First to 3", "setupw_" + mid + "_3", "primary", pe="trophy")],
+            [btn("Cancel", "cancel_" + mid, "danger", pe="no")],
+        ])
+        panel = mid_msg or m.get("panel_msg")
+        if panel:
+            edit_message(chat_id, panel, text, reply_markup=markup)
+        else:
+            send(chat_id, text, reply_markup=markup)
+        return
+
+    # Setup wizard: wins needed
+    if data.startswith("setupw_"):
+        parts = data.split("_")
+        if len(parts) < 3:
+            return answer_cb(cq["id"], "Bad", True)
+        mid, w_s = parts[1], parts[2]
+        m = d["matches"].get(mid)
+        if not m or str(m.get("uid")) != uid:
+            return answer_cb(cq["id"], "Not yours", True)
+        try:
+            need = max(1, min(3, int(w_s)))
+        except Exception:
+            need = 1
+        m["need"] = need
+        m["wait"] = "pvp"
+        d["matches"][mid] = m
+        save(d)
+        ok()
+        emoji = m.get("emoji") or "🎲"
+        mode_txt = str(m.get("n") or 1) + "d" + str(need) + "w"
+        tag = '<a href="tg://user?id=' + str(m["uid"]) + '">' + safe_name(m.get("player_name"), "Player") + "</a>"
+        text = qbox(
+            emoji + " <b>" + str(m.get("game") or "").upper() + "</b> · " + tag + "\n"
+            + e("money") + " Stake: <b>" + fmt(m["stake"]) + "</b> · " + mode_txt + "\n\n"
+            + e("users") + " Accept PvP or play Vs Bot"
+        )
+        markup = kb([
+            [btn("Accept", "acceptpvp_" + mid, "success", pe="ok"),
+             btn("Vs Bot", "vsbot_" + mid, "primary", pe="robot")],
+            [btn("Cancel", "cancel_" + mid, "danger", pe="no")],
+        ])
+        panel = mid_msg or m.get("panel_msg")
+        if panel:
+            edit_message(chat_id, panel, text, reply_markup=markup)
+        else:
+            send(chat_id, text, reply_markup=markup)
+        return
 
     if data.startswith("vsbot_"):
         mid = data[6:]
