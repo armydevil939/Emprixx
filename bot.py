@@ -1856,24 +1856,24 @@ def credit_cwallet(d, uid, amt_usdt, source="auto"):
     return inr
 
 def _is_genuine_cwallet_msg(msg, d):
-    """True if message is FROM official CWallet / CC tip bot (group auto-verify)."""
-    fr = msg.get("from") or {}
-    if not fr.get("is_bot"):
-        return False
-    # real CWallet posts are not user-forwards
+    """True if this looks like an official CWallet tip notice."""
+    # skip user-forwards of random chats
     if msg.get("forward_date") or msg.get("forward_from") or msg.get("forward_origin"):
         return False
+    fr = msg.get("from") or {}
     un = (fr.get("username") or "").lower().lstrip("@")
+    name = (fr.get("first_name") or "").lower()
     bots = _cwallet_bot_names(d)
+    text = (msg.get("text") or msg.get("caption") or "")
+    low = text.lower()
+    # classic format always accepted
+    if "tip details" in low and ("usdt" in low or "usd" in low):
+        return True
     if un and un in bots:
         return True
-    # username sometimes missing — match display name
-    name = (fr.get("first_name") or "").lower()
-    if "cwallet" in name or name.strip() in ("cc", "cctip", "c wallet"):
+    if "cwallet" in name or "cctip" in name or name.strip() in ("cc", "c wallet", "cwallet"):
         return True
-    # text signature: "tip details" + USDT +
-    text = (msg.get("text") or msg.get("caption") or "").lower()
-    if "tip details" in text and ("usdt" in text or "usd" in text):
+    if fr.get("is_bot") and ("usdt +" in low or "usdt+" in low):
         return True
     return False
 
@@ -1962,109 +1962,104 @@ def _norm_name(s):
 def try_cwallet_auto_message(msg, d):
     """
     Axom-style AUTO verify (no forward).
-    CWallet in group:
-      E6tra tip details:
-      USDT +0.059 Icugz
-    → credit tipper via pending amount or name match.
+    Any "tip details" + USDT message → match pending amount → credit.
     """
     text = (msg.get("text") or msg.get("caption") or "")
     if not text:
         return False
-    # Detect CWallet tip format even if sender not marked is_bot
     low_check = text.lower()
-    looks_like_tip = ("tip details" in low_check and "usdt" in low_check) or (
-        "usdt +" in low_check or "usdt+" in low_check
-    )
-    if not looks_like_tip and not _is_genuine_cwallet_msg(msg, d):
+    if "tip details" not in low_check and "usdt +" not in low_check and "usdt+" not in low_check:
         return False
-    if looks_like_tip and not _is_genuine_cwallet_msg(msg, d):
-        # still require sender looks like cwallet (name/username)
+    # Must look like CWallet (skip random users typing similar text)
+    if not _is_genuine_cwallet_msg(msg, d):
         fr = msg.get("from") or {}
-        un = (fr.get("username") or "").lower()
         nm = (fr.get("first_name") or "").lower()
-        bots = _cwallet_bot_names(d)
-        if un not in bots and "cwallet" not in nm and "cctip" not in nm and nm.strip() not in ("cc", "c wallet"):
-            # allow if text is exact tip-details format (group has only one CWallet)
+        un = (fr.get("username") or "").lower()
+        if "cwallet" not in nm and "cwallet" not in un and "cctip" not in un and not fr.get("is_bot"):
+            # still allow pure tip-details format in groups (Axom style)
             if "tip details" not in low_check:
                 return False
 
     parsed = _parse_cwallet_tip(text)
     if not parsed:
+        print("cw parse fail:", text[:120])
         return False
-    finance = _finance_user(d)
-    rec = (parsed.get("recipient") or "").lower().lstrip("@")
-    low = text.lower().replace("@", "")
     amt = float(parsed["amount"] or 0)
     if amt <= 0:
         return False
+    finance = _finance_user(d)
+    rec = (parsed.get("recipient") or "").lower().lstrip("@")
+    tipper_name = parsed.get("tipper") or ""
+    print("cw tip seen:", "amt=", amt, "tipper=", tipper_name, "rec=", rec)
 
-    # Pending amount match (primary — works even if finance username differs)
+    # 1) Pending amount match (best)
     pend = d.get("cw_pending") or {}
     pending_hit = None
+    best_dt = 10**9
+    now = time.time()
     for uid_p, row in list(pend.items()):
         try:
-            if abs(float(row.get("amt") or 0) - amt) < 0.0005 and time.time() - float(row.get("ts") or 0) < 900:
+            pa = float(row.get("amt") or 0)
+            dt = now - float(row.get("ts") or 0)
+            if abs(pa - amt) < 0.001 and dt < 1200 and dt < best_dt:
                 pending_hit = str(uid_p)
-                break
+                best_dt = dt
         except Exception:
             pass
 
-    aliases = {(finance or "").lower()}
-    for a in (d.get("settings") or {}).get("cwallet_aliases") or []:
-        aliases.add(str(a).lower().lstrip("@"))
-    finance_ok = (not rec) or (rec in aliases) or (finance in low) or bool(pending_hit)
-    if not finance_ok:
-        return False
-
-    tipper_name = parsed.get("tipper") or ""
-    tipper_uid = pending_hit or _resolve_user_by_name(d, tipper_name)
-
+    # 2) Name / username match
+    tipper_uid = pending_hit
+    if not tipper_uid:
+        tipper_uid = _resolve_user_by_name(d, tipper_name)
     if not tipper_uid and tipper_name:
         nt = _norm_name(tipper_name)
         for uid_, uu in (d.get("users") or {}).items():
             for field in ("username", "name", "first_name"):
                 nv = _norm_name(uu.get(field))
-                if nv and (nv == nt or nt in nv or nv in nt):
+                if nv and (nv == nt or (len(nt) >= 3 and (nt in nv or nv in nt))):
                     tipper_uid = str(uid_)
                     break
             if tipper_uid:
                 break
 
     if not tipper_uid:
+        print("cw unmapped tipper", tipper_name, "pending keys", list(pend.keys()))
+        chat_id = (msg.get("chat") or {}).get("id")
         logc = d["settings"].get("logger_chat")
+        warn = e("warn") + " CWallet tip <b>" + str(amt) + " USDT</b> from <b>" + str(tipper_name) + "</b> — user not linked.\nThey must /start the bot, then tip again."
         if logc:
-            send(logc, e("warn") + " CW tip unmapped: <b>" + str(tipper_name) + "</b> +" + str(amt)
-                 + "U → @" + (rec or finance))
+            send(logc, warn)
+        if chat_id:
+            send(chat_id, warn)
         return True
 
-    h = str(hash((parsed.get("raw") or "")[:200] + str(amt) + str(tipper_uid)))
+    h = str(hash(str(amt) + "|" + str(tipper_uid) + "|" + str(tipper_name) + "|" + str(int(now // 60))))
     seen = d.setdefault("cw_seen", [])
     if h in seen:
+        print("cw already credited", h)
         return True
     seen.append(h)
     d["cw_seen"] = seen[-500:]
-    if str(tipper_uid) in (d.get("cw_pending") or {}):
+    if str(tipper_uid) in pend:
         d["cw_pending"].pop(str(tipper_uid), None)
 
     inr = credit_cwallet(d, tipper_uid, amt, "bot_auto")
+    print("cw credited", tipper_uid, inr)
     chat_id = (msg.get("chat") or {}).get("id")
+    uu = (d.get("users") or {}).get(str(tipper_uid)) or {}
+    un = uu.get("username")
+    who = ("@" + un) if un else str(tipper_name or tipper_uid)
+    body = (
+        e("ok") + " <b>Deposit received</b>\n"
+        + "From: CWallet (USDT)\n"
+        + "Amount: <b>" + str(amt) + " USDT</b>\n"
+        + "Value: ≈ <b>" + fmt(inr) + "</b>\n"
+        + "Credited to " + who
+    )
+    if chat_id:
+        send(chat_id, qbox(body))
     try:
-        uu = (d.get("users") or {}).get(str(tipper_uid)) or {}
-        un = uu.get("username")
-        who = ("@" + un) if un else str(tipper_name or tipper_uid)
-        if chat_id:
-            send(chat_id, qbox(
-                e("ok") + " <b>Deposit received</b>\n"
-                + "From: CWallet (USDT)\n"
-                + "Amount: <b>" + str(amt) + " USDT</b>\n"
-                + "Value: ≈ <b>" + fmt(inr) + "</b>\n"
-                + "Credited to " + who
-            ))
-    except Exception as ex:
-        print("cw announce", ex)
-    try:
-        send(int(tipper_uid), e("ok") + " <b>Deposit received</b>\n"
-             + str(amt) + " USDT → <b>" + fmt(inr) + "</b>")
+        send(int(tipper_uid), e("ok") + " <b>Deposit received</b>\n" + str(amt) + " USDT → <b>" + fmt(inr) + "</b>")
     except Exception:
         pass
     logc = d["settings"].get("logger_chat")
@@ -4535,10 +4530,10 @@ def handle_callback(cq):
         cw = d["settings"].get("cwallet_user") or "Emprixx_finance"
         return menu_edit(
             e("money") + " <b>CWallet Auto Deposit</b>\n\n"
-            + "1. Group me type karo:\n<code>Cc 5 usdt @" + cw + "</code>\n"
-            + "2. CWallet se @" + cw + " ko tip karo\n"
-            + "3. CWallet jab group me tip details post kare → <b>auto credit</b>\n\n"
-            + e("ok") + " Forward ki zaroorat nahi (Axom style)",
+            + "1. In the group type:\n<code>Cc 5 usdt @" + cw + "</code>\n"
+            + "2. Tip <b>@" + cw + "</b> via CWallet\n"
+            + "3. When CWallet posts tip details → <b>auto credit</b>\n\n"
+            + e("ok") + " No forward needed",
             kb([[btn("Back", "deposit", pe="home")]]))
     if data == "dep_stars":
         ok()
